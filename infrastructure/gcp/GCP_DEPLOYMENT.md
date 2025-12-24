@@ -14,6 +14,124 @@ The webapp calls the worker over HTTPS using `WORKER_URL` and (optionally) `WORK
 
 ---
 
+## GUI-first setup (click-by-click) — no gcloud required
+
+You can do almost everything in the **GCP Console UI**. The only place you still need “command line” is **inside the VM** to install software (Node, MongoDB, model deps). Even that can be done by copy/pasting commands into the built‑in browser SSH.
+
+This section mirrors the guide, but with **exact UI clicks**.
+
+### A) Select the correct project
+1. Open Google Cloud Console.
+2. Top bar → click the **project dropdown**.
+3. Select your project: **`vocalx`**.
+
+### B) Enable Compute Engine API
+1. Left menu → **APIs & Services** → **Enabled APIs & services**.
+2. Click **+ ENABLE APIS AND SERVICES**.
+3. Search **Compute Engine API** → click → **Enable**.
+
+### C) Create firewall rules (UI)
+1. Left menu → **VPC network** → **Firewall**.
+2. Click **CREATE FIREWALL RULE**.
+
+#### Rule 1 — Allow IAP SSH (required when external IPs are blocked)
+Fill:
+- **Name**: `vocalx-allow-iap-ssh`
+- **Network**: `default` (unless you created a custom one)
+- **Direction**: Ingress
+- **Targets**: Specified target tags
+- **Target tags**: `vocalx-web`, `vocalx-worker`
+- **Source filter**: IPv4 ranges
+- **Source IPv4 ranges**: `35.235.240.0/20`
+- **Protocols and ports**: Specified protocols and ports → check **tcp** and type `22`
+Click **Create**.
+
+#### Rule 2 — Allow webapp → worker (internal)
+Create another firewall rule:
+- **Name**: `vocalx-worker-allow-internal`
+- **Direction**: Ingress
+- **Targets**: Specified target tags
+- **Target tags**: `vocalx-worker`
+- **Source filter**: Source tags
+- **Source tags**: `vocalx-web`
+- **Protocols and ports**: tcp `8000`
+Click **Create**.
+
+> You can skip the public 80/443 rules if you don’t have a load balancer and your org blocks external IPs.
+
+### D) Create Cloud NAT (UI) — needed so no-external-IP VMs can install packages
+With no public IP, your VMs still need outbound internet to download Node/Mongo packages. Cloud NAT provides that.
+
+1. Left menu → **VPC network** → **NAT gateways**.
+2. Click **CREATE NAT GATEWAY**.
+3. If prompted, first **Create Cloud Router**:
+   - **Router name**: `vocalx-router`
+   - **Network**: `default`
+   - **Region**: choose the same region as your VMs (example `us-central1`)
+   - Click **Create**.
+4. Back on NAT creation:
+   - **NAT name**: `vocalx-nat`
+   - **Region**: same region (example `us-central1`)
+   - **Cloud Router**: `vocalx-router`
+   - **NAT mapping**: Auto
+   - **Source subnetwork IP ranges**: All subnetworks (or just the one you use)
+5. Click **Create**.
+
+### E) Create the Webapp VM (CPU) (UI) — cheapest/minimal
+1. Left menu → **Compute Engine** → **VM instances**.
+2. Click **CREATE INSTANCE**.
+3. Set:
+   - **Name**: `vocalx-webapp`
+   - **Region**: `us-central1` (or any you choose)
+   - **Zone**: `us-central1-a`
+4. **Machine configuration**:
+   - Series: `E2`
+   - Machine type: **`e2-small`** (cheapest reasonable)
+5. **Boot disk**:
+   - Click **Change**
+   - OS: **Ubuntu 22.04 LTS**
+   - Size: **30 GB**
+   - Click **Select**
+6. **Networking** (important):
+   - Expand **Advanced options** → **Networking** → **Network interfaces**
+   - Edit the primary interface
+   - **External IPv4**: select **None** (no public IP)
+   - Save
+7. **Management**:
+   - Add **Network tags**: `vocalx-web`
+8. Click **Create**.
+
+### F) Create the Worker VM (GPU) (UI) — cheapest GPU (T4)
+1. Compute Engine → VM instances → **CREATE INSTANCE**.
+2. Set:
+   - **Name**: `vocalx-worker`
+   - Region/Zone: same as webapp (example `us-central1-a`)
+3. Machine configuration:
+   - Choose **N1** series → `n1-standard-4` (common for T4)
+4. Add GPU:
+   - Click **Add GPU**
+   - GPU type: **NVIDIA Tesla T4**
+   - Number of GPUs: **1**
+   - When prompted, set **On host maintenance** to **Terminate** (required for GPUs)
+5. Boot disk:
+   - Ubuntu 22.04 LTS
+   - Size: **200 GB** (models + deps)
+6. Networking:
+   - External IPv4: **None**
+7. Management:
+   - Network tags: `vocalx-worker`
+8. Click **Create**.
+
+### G) SSH into VMs using the browser (IAP)
+1. Compute Engine → VM instances.
+2. On `vocalx-webapp`, click **SSH**.
+   - This uses IAP automatically when there is no external IP.
+3. Repeat for `vocalx-worker`.
+
+From there you will run the install commands in the rest of this document.
+
+---
+
 ## 0) Create project + enable APIs
 
 ### In the GCP Console (click-by-click)
