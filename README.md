@@ -3,9 +3,7 @@
 This repo is evolving into a full-stack VocalX platform:
 
 - `apps/webapp`: Next.js 14 web app (Studio UI + API)
-- `apps/mobile`: Expo / React Native app (light client)
-- `packages/shared`: shared TypeScript types/utilities
-- `infrastructure/paperspace`: job runner + model management for GPU processing
+- `apps/mobile`: Expo / React Native app (standalone; manage deps inside `apps/mobile`)
 
 ## Development (local)
 
@@ -19,6 +17,16 @@ Run all apps:
 
 ```bash
 npm run dev
+```
+
+## Mobile (standalone)
+
+The mobile app is not part of the root monorepo workspaces. To run it locally:
+
+```bash
+cd apps/mobile
+npm install
+npm run start
 ```
 
 ## Legacy (archived)

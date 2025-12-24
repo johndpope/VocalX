@@ -17,14 +17,6 @@
     },
     "typecheck": {
       "cache": false
-    },
-    "affiliate:dev": {
-      "cache": false,
-      "persistent": true
-    },
-    "affiliate:build": {
-      "cache": false,
-      "outputs": [".next/**"]
     }
   }
 }

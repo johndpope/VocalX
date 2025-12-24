@@ -3,13 +3,13 @@
 ## Overview
 - Repo is transitioning from a heavy on-device Android ML app to a **cloud-first** architecture.
 - Current monorepo layout:
-  - `apps/webapp`: Next.js 14 web app + API (NextAuth + Prisma + S3 signed uploads + processing job endpoints)
+  - `apps/webapp`: Next.js 14 web app + API (NextAuth + MongoDB/Mongoose + S3 signed uploads + processing job endpoints)
   - `apps/mobile`: Expo / React Native “light client” that hosts the webapp inside a WebView (so auth/upload works immediately)
 
 ## Architecture (current)
 - **Webapp (`apps/webapp`)**
   - Auth: NextAuth route + middleware gate for protected pages
-  - DB: Prisma schema + Prisma Client
+  - DB: MongoDB (Mongoose models + native driver for migration scripts)
   - Storage: S3 signed upload endpoint implemented (download/delete TODO)
   - Processing: submit/status/cancel endpoints; Paperspace and Stripe are currently **stubbed** until keys are provided
 
@@ -19,7 +19,8 @@
   - Settings: stores webapp base URL in AsyncStorage; on first launch the app auto-detects the best URL by probing `/api/v1/health` and persists it (default emulator: `http://10.0.2.2:3000`)
 
 ## Components / Key Files
-- `apps/webapp/prisma/schema.prisma`: core database models
+- `apps/webapp/models/*`: Mongoose schemas for core data
+- `apps/webapp/lib/mongo.ts`: shared Mongoose connection helper
 - `apps/webapp/app/api/v1/files/upload/route.ts`: S3 signed upload + DB record
 - `apps/webapp/app/api/v1/processing/submit/route.ts`: create job + stub Paperspace submission
 - `apps/mobile/src/components/WebappScreen.tsx`: reusable WebView container for webapp pages

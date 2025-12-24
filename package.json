@@ -4,16 +4,13 @@
   "private": true,
   "packageManager": "npm@10.2.4",
   "workspaces": [
-    "apps/*",
-    "packages/*"
+    "apps/webapp"
   ],
   "scripts": {
     "dev": "turbo dev",
     "build": "turbo build",
     "lint": "turbo lint",
-    "typecheck": "turbo typecheck",
-    "affiliate:dev": "turbo run dev --filter=affiliate-webapp",
-    "affiliate:build": "turbo run build --filter=affiliate-webapp"
+    "typecheck": "turbo typecheck"
   },
   "devDependencies": {
     "turbo": "^2.5.6"

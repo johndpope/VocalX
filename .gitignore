@@ -51,3 +51,10 @@ apps/webapp/Models/
 *.safetensors
 *.onnx
 .cursor\rules\openmemory.mdc
+
+# IDE
+.vscode/
+
+# Local probe files
+probe-*.txt
+task-*.txt

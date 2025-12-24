@@ -1,75 +1,99 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
-type StudioMode = "audio" | "video" | "multimodal";
-type PromptType = "text" | "span" | "visual";
-type EditMode = "isolate" | "remove" | "attenuate";
+type ResultFile = { url: string; filename: string; createdAt: number };
+type ResultsState = { target?: ResultFile; residual?: ResultFile };
 
-export type Prompt = {
-  id: string;
-  type: PromptType;
-  text?: string;
-  span?: { startSec: number; endSec: number };
-  visualRef?: { frameIndex: number; instanceId?: string };
-  mode: EditMode;
-  target: "audio" | "video" | "both";
-};
-
-function formatTime(sec: number): string {
-  const m = Math.floor(sec / 60);
-  const s = sec - m * 60;
-  return `${String(m).padStart(2, "0")}:${s.toFixed(1).padStart(4, "0")}`;
+function clamp(n: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, n));
 }
 
-function uuid(): string {
-  return crypto.randomUUID();
+function estimateSeconds(file: File | null): number | null {
+  if (!file) return null;
+  const sizeMb = file.size / (1024 * 1024);
+  const seconds = Math.round(sizeMb * 5) + 8;
+  return clamp(seconds, 8, 75);
 }
 
 export function StudioClient() {
-  const [mode, setMode] = useState<StudioMode>("audio");
+  const inputRef = useRef<HTMLInputElement | null>(null);
+
   const [file, setFile] = useState<File | null>(null);
-  const [promptText, setPromptText] = useState("A man speaking");
-  const [editMode, setEditMode] = useState<EditMode>("isolate");
-  const [spanStart, setSpanStart] = useState(0);
-  const [spanEnd, setSpanEnd] = useState(15);
-  const [useSpan, setUseSpan] = useState(false);
+  const [promptText, setPromptText] = useState("");
   const [isRunning, setIsRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [history, setHistory] = useState<Prompt[]>([]);
+  const [results, setResults] = useState<ResultsState>({});
+  const [originalUrl, setOriginalUrl] = useState<string | null>(null);
+  const [isDragging, setIsDragging] = useState(false);
 
-  const spanLabel = useMemo(() => `${formatTime(spanStart)} – ${formatTime(spanEnd)}`, [spanStart, spanEnd]);
+  const [isolatedVol, setIsolatedVol] = useState(1);
+  const [backgroundVol, setBackgroundVol] = useState(1);
+
+  const isolatedAudioRef = useRef<HTMLAudioElement | null>(null);
+  const backgroundAudioRef = useRef<HTMLAudioElement | null>(null);
+
+  const hasResults = Boolean(results.target || results.residual);
+  const etaSeconds = useMemo(() => estimateSeconds(file), [file]);
+
+  const isVideo = Boolean(file?.type?.startsWith("video/"));
+
+  useEffect(() => {
+    if (!file) {
+      if (originalUrl) URL.revokeObjectURL(originalUrl);
+      setOriginalUrl(null);
+      return;
+    }
+    const url = URL.createObjectURL(file);
+    setOriginalUrl((prev) => {
+      if (prev) URL.revokeObjectURL(prev);
+      return url;
+    });
+    return () => URL.revokeObjectURL(url);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [file]);
+
+  useEffect(() => {
+    return () => {
+      if (results.target?.url) URL.revokeObjectURL(results.target.url);
+      if (results.residual?.url) URL.revokeObjectURL(results.residual.url);
+    };
+  }, [results.target?.url, results.residual?.url]);
+
+  useEffect(() => {
+    if (isolatedAudioRef.current) isolatedAudioRef.current.volume = isolatedVol;
+  }, [isolatedVol]);
+
+  useEffect(() => {
+    if (backgroundAudioRef.current) backgroundAudioRef.current.volume = backgroundVol;
+  }, [backgroundVol]);
+
+  function startOver() {
+    setError(null);
+    setPromptText("");
+    setFile(null);
+    setResults({});
+    setIsDragging(false);
+  }
+
+  function setPickedFile(next: File | null) {
+    setFile(next);
+    setError(null);
+    setResults({});
+    if (next && !promptText.trim()) setPromptText("speech");
+  }
 
   async function run(which: "target" | "residual") {
-    if (!file) {
-      setError("Please upload an audio/video file first.");
-      return;
-    }
-    if (!promptText.trim()) {
-      setError("Please enter a prompt.");
-      return;
-    }
+    if (!file) return setError("Upload an audio/video file first.");
+    if (!promptText.trim()) return setError("Type what you want to isolate (e.g. “speech”, “lead vocal”).");
 
     setIsRunning(true);
     setError(null);
     try {
-      const prompt: Prompt = {
-        id: uuid(),
-        type: useSpan ? "span" : "text",
-        text: promptText.trim(),
-        span: useSpan ? { startSec: spanStart, endSec: spanEnd } : undefined,
-        mode: editMode,
-        target: "audio",
-      };
-
-      // For now we only implement "isolate" with the local worker endpoint.
-      // Remove/attenuate will be applied later as post-processing in the webapp mixer.
-      const anchors = useSpan ? [["+", spanStart, spanEnd]] : null;
-
       const fd = new FormData();
       fd.set("file", file, file.name);
-      fd.set("description", prompt.text ?? "");
-      fd.set("anchorsJson", anchors ? JSON.stringify(anchors) : "");
+      fd.set("description", promptText.trim());
+      fd.set("anchorsJson", "");
       fd.set("which", which);
 
       const res = await fetch("/api/local/separate", { method: "POST", body: fd });
@@ -87,344 +111,353 @@ export function StudioClient() {
       const filename = match?.[1] || `${which}.wav`;
 
       const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = filename;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      URL.revokeObjectURL(url);
-
-      setHistory((h) => [prompt, ...h].slice(0, 20));
-    } catch (e: any) {
-      setError(e?.message || String(e));
+      setResults((prev) => {
+        const next: ResultsState = { ...prev };
+        if (which === "target") {
+          if (prev.target?.url) URL.revokeObjectURL(prev.target.url);
+          next.target = { url, filename, createdAt: Date.now() };
+        } else {
+          if (prev.residual?.url) URL.revokeObjectURL(prev.residual.url);
+          next.residual = { url, filename, createdAt: Date.now() };
+        }
+        return next;
+      });
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      setError(msg || "Unknown error");
     } finally {
       setIsRunning(false);
     }
   }
 
+  function downloadResult(which: "target" | "residual") {
+    const r = which === "target" ? results.target : results.residual;
+    if (!r) return;
+    const a = document.createElement("a");
+    a.href = r.url;
+    a.download = r.filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+  }
+
   return (
-    <main className="min-h-screen bg-slate-950 text-slate-100">
-      {/* Top bar */}
-      <header className="sticky top-0 z-20 border-b border-slate-800/70 bg-slate-950/70 backdrop-blur">
-        <div className="mx-auto flex max-w-[1600px] items-center justify-between gap-4 px-4 py-3">
-          <div className="flex items-center gap-3">
-            <div className="h-9 w-9 rounded-xl bg-gradient-to-br from-brand-500 to-emerald-300/70" />
-            <div className="leading-tight">
-              <div className="text-sm font-semibold">VocalX Studio</div>
-              <div className="text-xs text-slate-400">Promptable editor</div>
-            </div>
-          </div>
-
-          <div className="flex items-center gap-2 rounded-2xl border border-slate-800 bg-slate-900/40 p-1">
-            {(
-              [
-                ["audio", "Audio"],
-                ["video", "Video"],
-                ["multimodal", "Multimodal"],
-              ] as const
-            ).map(([key, label]) => (
-              <button
-                key={key}
-                onClick={() => setMode(key)}
-                className={[
-                  "h-9 rounded-xl px-3 text-sm font-semibold transition-colors",
-                  mode === key ? "bg-white/10 text-white" : "text-slate-300 hover:bg-white/5",
-                ].join(" ")}
-              >
-                {label}
-              </button>
-            ))}
-          </div>
-
-          <div className="flex items-center gap-2">
-            <div className="hidden rounded-xl border border-slate-800 bg-slate-900/40 px-3 py-2 text-xs text-slate-300 md:block">
-              GPU: local worker
-            </div>
-            <button
-              disabled={isRunning || mode !== "audio"}
-              onClick={() => run("target")}
-              className="inline-flex h-10 items-center justify-center rounded-xl bg-brand-500 px-4 text-sm font-semibold text-black disabled:opacity-50"
-              title={mode !== "audio" ? "Run is wired for Audio mode first" : undefined}
-            >
-              {isRunning ? "Running…" : "Run"}
-            </button>
+    <div className="h-full">
+      <div className="flex flex-col gap-3 border-b border-white/10 px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-6">
+        <div className="min-w-0">
+          <div className="text-sm font-semibold text-slate-100">Isolate sounds</div>
+          <div className="mt-1 text-xs text-slate-400">
+            Upload audio/video → describe the sound → download isolated track (SAM Audio).
           </div>
         </div>
-      </header>
 
-      {/* 3-column body */}
-      <div className="mx-auto grid max-w-[1600px] grid-cols-1 gap-4 px-4 py-4 lg:grid-cols-[320px_1fr_360px]">
-        {/* Left: sessions & presets */}
-        <aside className="rounded-2xl border border-slate-800 bg-slate-900/30 p-4">
-          <div className="flex items-center justify-between">
-            <div className="text-sm font-semibold">Sessions</div>
-            <button className="rounded-lg bg-white/5 px-2 py-1 text-xs text-slate-200 hover:bg-white/10">
-              New
-            </button>
-          </div>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={startOver}
+            className="inline-flex h-10 items-center justify-center rounded-xl border border-white/10 bg-white/5 px-4 text-sm font-semibold text-slate-100 hover:bg-white/10 active:scale-[0.99]"
+          >
+            Start over
+          </button>
+          <button
+            disabled={!results.target}
+            onClick={() => downloadResult("target")}
+            className="inline-flex h-10 items-center justify-center rounded-xl bg-brand-500 px-4 text-sm font-semibold text-black disabled:opacity-40"
+            title={results.target ? "Download isolated track" : "Run a separation first"}
+          >
+            Download
+          </button>
+        </div>
+      </div>
 
-          <div className="mt-4">
-            <div className="text-xs font-semibold text-slate-300">Presets</div>
-            <div className="mt-2 flex flex-wrap gap-2">
-              {["Clean dialog", "Vocals", "Drums", "Crowd noise", "Ambience"].map((p) => (
-                <button
-                  key={p}
-                  className="rounded-full border border-slate-800 bg-slate-950 px-3 py-1 text-xs text-slate-200 hover:bg-white/5"
-                  onClick={() => {
-                    if (p === "Clean dialog") setPromptText("speech");
-                    if (p === "Vocals") setPromptText("lead vocal");
-                    if (p === "Drums") setPromptText("drums");
-                    if (p === "Crowd noise") setPromptText("crowd noise");
-                    if (p === "Ambience") setPromptText("room tone");
-                  }}
-                >
-                  {p}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <div className="mt-6">
-            <div className="text-xs font-semibold text-slate-300">Prompt history</div>
-            <div className="mt-2 space-y-2">
-              {history.length === 0 ? (
-                <div className="rounded-xl border border-slate-800 bg-slate-950 p-3 text-xs text-slate-400">
-                  Run a prompt to see nodes appear here.
+      <div className="grid grid-cols-1 gap-4 p-4 lg:grid-cols-[320px_1fr] lg:gap-5 lg:p-6">
+        <aside className="rounded-2xl border border-white/10 bg-black/30 p-4">
+          {!hasResults ? (
+            <>
+              <div className="text-sm font-semibold">How it works</div>
+              <div className="mt-3 space-y-2 text-sm text-slate-300">
+                <div className="rounded-xl border border-white/10 bg-white/5 p-3">
+                  <div className="text-xs font-semibold text-slate-200">1. Add audio or video</div>
+                  <div className="mt-1 text-xs text-slate-400">Upload any file to start.</div>
                 </div>
-              ) : null}
-              {history.map((p) => (
-                <div key={p.id} className="rounded-xl border border-slate-800 bg-slate-950 p-3">
-                  <div className="flex items-center justify-between gap-2">
-                    <div className="text-xs font-semibold text-slate-200">
-                      {p.type === "span" ? "⏱ Span" : "T Text"} • {p.mode}
-                    </div>
-                    <button className="text-xs text-slate-400 hover:text-slate-200" title="Toggle later">
-                      ⟳
-                    </button>
-                  </div>
-                  <div className="mt-1 text-xs text-slate-300">{p.text}</div>
-                  {p.span ? <div className="mt-1 text-[11px] text-slate-500">{formatTime(p.span.startSec)}–{formatTime(p.span.endSec)}</div> : null}
+                <div className="rounded-xl border border-white/10 bg-white/5 p-3">
+                  <div className="text-xs font-semibold text-slate-200">2. Isolate sound</div>
+                  <div className="mt-1 text-xs text-slate-400">Type what you want to extract.</div>
                 </div>
-              ))}
-            </div>
-          </div>
+                <div className="rounded-xl border border-white/10 bg-white/5 p-3">
+                  <div className="text-xs font-semibold text-slate-200">3. Download</div>
+                  <div className="mt-1 text-xs text-slate-400">Get isolated + background tracks.</div>
+                </div>
+              </div>
+
+              <div className="mt-5">
+                <div className="text-xs font-semibold text-slate-300">Model</div>
+                <div className="mt-2 inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs text-slate-200">
+                  SAM Audio
+                  <span className="h-1 w-1 rounded-full bg-emerald-400/80" />
+                  <span className="text-slate-400">remote worker</span>
+                </div>
+              </div>
+
+              <div className="mt-6 rounded-xl border border-white/10 bg-white/5 p-3">
+                <div className="text-xs font-semibold text-slate-200">Subscription</div>
+                <div className="mt-1 text-xs text-slate-400">Free (MVP). Usage tracking comes next.</div>
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="text-sm font-semibold">Add sound effects</div>
+              <div className="mt-1 text-xs text-slate-400">
+                Preview-only controls (processing effects will be wired later).
+              </div>
+
+              <div className="mt-4">
+                <div className="text-xs font-semibold text-slate-300">Isolated sound</div>
+                <input
+                  className="mt-2 w-full accent-brand-500"
+                  type="range"
+                  min={0}
+                  max={1}
+                  step={0.01}
+                  value={isolatedVol}
+                  onChange={(e) => setIsolatedVol(Number(e.target.value))}
+                />
+              </div>
+
+              <div className="mt-4">
+                <div className="text-xs font-semibold text-slate-300">Without isolated sound</div>
+                <input
+                  className="mt-2 w-full accent-brand-500"
+                  type="range"
+                  min={0}
+                  max={1}
+                  step={0.01}
+                  value={backgroundVol}
+                  onChange={(e) => setBackgroundVol(Number(e.target.value))}
+                />
+              </div>
+
+              <div className="mt-6 space-y-2">
+                {["Reverb", "Delay", "Equalizer", "Compressor"].map((label) => (
+                  <button
+                    key={label}
+                    className="flex w-full items-center justify-between rounded-xl border border-white/10 bg-white/5 px-3 py-3 text-sm text-slate-200 hover:bg-white/10"
+                    type="button"
+                  >
+                    <span>{label}</span>
+                    <span className="text-xs text-slate-500">soon</span>
+                  </button>
+                ))}
+              </div>
+            </>
+          )}
         </aside>
 
-        {/* Center: canvas */}
-        <section className="rounded-2xl border border-slate-800 bg-slate-900/30 p-4">
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <div>
-              <div className="text-sm font-semibold">
-                {mode === "audio" ? "Waveform" : mode === "video" ? "Video canvas" : "Multimodal canvas"}
+        <section className="min-w-0">
+          {!file ? (
+            <div className="rounded-2xl border border-dashed border-white/15 bg-black/20 p-6 sm:p-10">
+              <div
+                className={[
+                  "flex min-h-[320px] flex-col items-center justify-center rounded-2xl border border-white/10 bg-white/[0.03] px-6 py-10 text-center transition",
+                  isDragging ? "ring-2 ring-brand-500/60" : "",
+                ].join(" ")}
+                onDragEnter={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  setIsDragging(true);
+                }}
+                onDragOver={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  setIsDragging(true);
+                }}
+                onDragLeave={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  setIsDragging(false);
+                }}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  setIsDragging(false);
+                  const f = e.dataTransfer.files?.[0] ?? null;
+                  setPickedFile(f);
+                }}
+              >
+                <div className="text-sm text-slate-300">Start with your own audio or video</div>
+                <button
+                  type="button"
+                  onClick={() => inputRef.current?.click()}
+                  className="mt-5 inline-flex h-11 items-center justify-center rounded-full border border-brand-500/40 bg-brand-500/10 px-7 text-sm font-semibold text-slate-50 hover:bg-brand-500/15"
+                >
+                  Upload
+                </button>
+                <div className="mt-3 text-xs text-slate-500">MP3, WAV, MP4… (we convert to WAV in the worker)</div>
+
+                <input
+                  ref={inputRef}
+                  className="hidden"
+                  type="file"
+                  accept="audio/*,video/*"
+                  onChange={(e) => setPickedFile(e.target.files?.[0] ?? null)}
+                />
               </div>
-              <div className="text-xs text-slate-400">
-                {mode === "audio"
-                  ? "Upload a file, select a span, then prompt."
-                  : mode === "video"
-                    ? "SAM3 prompting + propagation (next)."
-                    : "Combine text + span + visual chips (next)."}
+
+              <div className="mt-8 text-center text-xs text-slate-500">Or try a sample audio or video</div>
+              <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
+                {["Interview", "Cafe", "Action"].map((label) => (
+                  <button
+                    key={label}
+                    type="button"
+                    className="group aspect-video rounded-xl border border-white/10 bg-gradient-to-br from-white/10 to-transparent p-3 text-left hover:bg-white/10"
+                    title="Sample assets coming soon"
+                    onClick={() => setError("Sample assets aren’t wired yet — please upload your own file.")}
+                  >
+                    <div className="text-sm font-semibold text-slate-200">{label}</div>
+                    <div className="mt-1 text-xs text-slate-500">Sample (soon)</div>
+                    <div className="mt-3 h-1 w-10 rounded-full bg-brand-500/30 transition group-hover:bg-brand-500/50" />
+                  </button>
+                ))}
               </div>
+
+              {error ? (
+                <div className="mt-6 rounded-xl border border-red-900/60 bg-red-950/40 p-3 text-sm text-red-200">
+                  {error}
+                </div>
+              ) : null}
             </div>
-
-            <label className="inline-flex cursor-pointer items-center gap-2 rounded-xl border border-slate-800 bg-slate-950 px-3 py-2 text-xs text-slate-200 hover:bg-white/5">
-              <input
-                className="hidden"
-                type="file"
-                accept="audio/*,video/*"
-                onChange={(e) => setFile(e.target.files?.[0] ?? null)}
-              />
-              <span className="rounded-lg bg-white/10 px-2 py-1 text-[11px]">Upload</span>
-              <span className="max-w-[220px] truncate text-slate-300">{file ? file.name : "audio/video file"}</span>
-            </label>
-          </div>
-
-          <div className="mt-4 rounded-2xl border border-slate-800 bg-slate-950 p-4">
-            {mode === "audio" ? (
-              <>
-                <div className="text-xs font-semibold text-slate-300">Lanes</div>
-                <div className="mt-3 space-y-3">
-                  {["Original mix", "Target (current)", "Residual"].map((lane) => (
-                    <div key={lane} className="rounded-xl border border-slate-800 bg-slate-900/30 p-3">
-                      <div className="flex items-center justify-between">
-                        <div className="text-xs text-slate-200">{lane}</div>
-                        <div className="text-[11px] text-slate-500">{useSpan ? `Selected: ${spanLabel}` : "No span selected"}</div>
-                      </div>
-                      <div className="mt-2 h-10 rounded-lg bg-gradient-to-r from-slate-900 via-slate-950 to-slate-900" />
+          ) : (
+            <div className="space-y-4">
+              <div className="rounded-2xl border border-white/10 bg-black/20 p-4">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="min-w-0">
+                    <div className="truncate text-sm font-semibold text-slate-100">{file.name}</div>
+                    <div className="mt-1 text-xs text-slate-500">
+                      {(file.size / (1024 * 1024)).toFixed(1)} MB{etaSeconds ? ` • ~${etaSeconds}s` : ""}
                     </div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      className="inline-flex h-10 items-center justify-center rounded-xl border border-white/10 bg-white/5 px-4 text-sm text-slate-200 hover:bg-white/10"
+                      onClick={() => inputRef.current?.click()}
+                    >
+                      Replace
+                    </button>
+                    <input
+                      ref={inputRef}
+                      className="hidden"
+                      type="file"
+                      accept="audio/*,video/*"
+                      onChange={(e) => setPickedFile(e.target.files?.[0] ?? null)}
+                    />
+                  </div>
+                </div>
+
+                <div className="mt-4">
+                  {originalUrl ? (
+                    isVideo ? (
+                      <video className="w-full rounded-xl border border-white/10 bg-black" controls src={originalUrl} />
+                    ) : (
+                      <audio className="w-full" controls src={originalUrl} />
+                    )
+                  ) : null}
+                </div>
+              </div>
+
+              <div className="rounded-2xl border border-white/10 bg-black/20 p-4">
+                <div className="text-xs font-semibold text-slate-300">What do you want to isolate?</div>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {["speech", "lead vocal", "drums", "crowd noise", "room tone"].map((p) => (
+                    <button
+                      key={p}
+                      type="button"
+                      className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs text-slate-200 hover:bg-white/10"
+                      onClick={() => setPromptText(p)}
+                    >
+                      {p}
+                    </button>
                   ))}
                 </div>
-              </>
-            ) : (
-              <div className="flex h-[340px] items-center justify-center text-sm text-slate-400">
-                {mode === "video"
-                  ? "Video canvas + mask overlay will appear here."
-                  : "Multimodal prompt chips + results tracks will appear here."}
-              </div>
-            )}
-          </div>
-        </section>
+                <input
+                  value={promptText}
+                  onChange={(e) => setPromptText(e.target.value)}
+                  placeholder='e.g. "A dog barking", "lead vocal", "speech"'
+                  className="mt-3 block w-full rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-600"
+                />
 
-        {/* Right: prompt + outputs */}
-        <aside className="rounded-2xl border border-slate-800 bg-slate-900/30 p-4">
-          <div className="flex items-center justify-between">
-            <div className="text-sm font-semibold">Prompt</div>
-            <div className="text-xs text-slate-400">{mode.toUpperCase()}</div>
-          </div>
-
-          {mode === "audio" ? (
-            <>
-              <div className="mt-4 space-y-4">
-                <div>
-                  <div className="text-xs font-semibold text-slate-300">Text</div>
-                  <input
-                    className="mt-2 block w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-600"
-                    value={promptText}
-                    onChange={(e) => setPromptText(e.target.value)}
-                    placeholder='e.g. "lead vocal", "dog barking", "car horn"'
-                  />
-                  <div className="mt-2 flex flex-wrap gap-2">
-                    {["Vocals", "Speech", "Drums", "Crowd", "Ambience"].map((chip) => (
-                      <button
-                        key={chip}
-                        className="rounded-full bg-white/10 px-3 py-1 text-xs text-slate-200 hover:bg-white/15"
-                        onClick={() => {
-                          if (chip === "Vocals") setPromptText("lead vocal");
-                          if (chip === "Speech") setPromptText("speech");
-                          if (chip === "Drums") setPromptText("drums");
-                          if (chip === "Crowd") setPromptText("crowd noise");
-                          if (chip === "Ambience") setPromptText("room tone");
-                        }}
-                      >
-                        {chip}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                <div>
-                  <div className="flex items-center justify-between">
-                    <div className="text-xs font-semibold text-slate-300">Span prompt</div>
-                    <label className="inline-flex items-center gap-2 text-xs text-slate-300">
-                      <input
-                        type="checkbox"
-                        checked={useSpan}
-                        onChange={(e) => setUseSpan(e.target.checked)}
-                        className="h-4 w-4 accent-brand-500"
-                      />
-                      Use span
-                    </label>
-                  </div>
-                  <div className="mt-2 rounded-xl border border-slate-800 bg-slate-950 p-3">
-                    <div className="text-[11px] text-slate-400">Selected: {spanLabel}</div>
-                    <div className="mt-2 space-y-3">
-                      <div>
-                        <div className="flex items-center justify-between text-[11px] text-slate-400">
-                          <span>Start</span>
-                          <span>{formatTime(spanStart)}</span>
-                        </div>
-                        <input
-                          type="range"
-                          min={0}
-                          max={Math.max(spanEnd, 1)}
-                          step={0.5}
-                          value={spanStart}
-                          onChange={(e) => setSpanStart(Math.min(Number(e.target.value), spanEnd))}
-                          className="mt-1 w-full accent-brand-500"
-                        />
-                      </div>
-                      <div>
-                        <div className="flex items-center justify-between text-[11px] text-slate-400">
-                          <span>End</span>
-                          <span>{formatTime(spanEnd)}</span>
-                        </div>
-                        <input
-                          type="range"
-                          min={spanStart}
-                          max={180}
-                          step={0.5}
-                          value={spanEnd}
-                          onChange={(e) => setSpanEnd(Math.max(Number(e.target.value), spanStart))}
-                          className="mt-1 w-full accent-brand-500"
-                        />
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                <div>
-                  <div className="text-xs font-semibold text-slate-300">Edit mode</div>
-                  <div className="mt-2 grid grid-cols-3 gap-2">
-                    {(["isolate", "remove", "attenuate"] as const).map((m) => (
-                      <button
-                        key={m}
-                        onClick={() => setEditMode(m)}
-                        className={[
-                          "rounded-xl border px-3 py-2 text-xs font-semibold",
-                          editMode === m
-                            ? "border-emerald-400/40 bg-emerald-500/10 text-emerald-200"
-                            : "border-slate-800 bg-slate-950 text-slate-200 hover:bg-white/5",
-                        ].join(" ")}
-                      >
-                        {m}
-                      </button>
-                    ))}
-                  </div>
-                  <div className="mt-2 text-[11px] text-slate-500">
-                    Note: only <span className="text-slate-300">isolate</span> is executed in the worker right now;{" "}
-                    remove/attenuate will be applied as mix operations next.
-                  </div>
-                </div>
-
-                <div className="rounded-2xl border border-slate-800 bg-slate-950 p-3">
-                  <div className="text-xs font-semibold text-slate-300">Outputs</div>
-                  <div className="mt-3 grid grid-cols-2 gap-2">
-                    <button
-                      disabled={isRunning}
-                      onClick={() => run("target")}
-                      className="rounded-xl bg-brand-500 px-3 py-2 text-xs font-semibold text-black disabled:opacity-50"
-                    >
-                      Download target.wav
-                    </button>
-                    <button
-                      disabled={isRunning}
-                      onClick={() => run("residual")}
-                      className="rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-xs font-semibold text-slate-100 hover:bg-white/5 disabled:opacity-50"
-                    >
-                      Download residual.wav
-                    </button>
-                  </div>
+                <div className="mt-4 flex flex-col gap-2 sm:flex-row">
+                  <button
+                    disabled={isRunning}
+                    onClick={() => run("target")}
+                    className="inline-flex h-11 items-center justify-center rounded-xl bg-brand-500 px-5 text-sm font-semibold text-black disabled:opacity-50"
+                  >
+                    {isRunning ? "Processing…" : "Isolate sound"}
+                  </button>
+                  <button
+                    disabled={isRunning}
+                    onClick={() => run("residual")}
+                    className="inline-flex h-11 items-center justify-center rounded-xl border border-white/10 bg-white/5 px-5 text-sm font-semibold text-slate-100 hover:bg-white/10 disabled:opacity-50"
+                  >
+                    Get background track
+                  </button>
                 </div>
 
                 {error ? (
-                  <div className="rounded-xl border border-red-900/60 bg-red-950/40 p-3 text-sm text-red-200">
+                  <div className="mt-4 rounded-xl border border-red-900/60 bg-red-950/40 p-3 text-sm text-red-200">
                     {error}
                   </div>
                 ) : null}
               </div>
-            </>
-          ) : (
-            <div className="mt-4 rounded-2xl border border-slate-800 bg-slate-950 p-4 text-sm text-slate-300">
-              {mode === "video" ? (
-                <>
-                  <div className="font-semibold">Video Studio (next)</div>
-                  <div className="mt-2 text-slate-400">
-                    Prompt a frame (text/box/point) → generate mask → propagate across the clip with SAM3.
+
+              <div className="rounded-2xl border border-white/10 bg-black/20 p-4">
+                <div className="flex items-center justify-between">
+                  <div className="text-sm font-semibold">Results</div>
+                  <div className="text-xs text-slate-500">Download WAV</div>
+                </div>
+
+                <div className="mt-4 space-y-4">
+                  <div className="rounded-xl border border-white/10 bg-black/30 p-3">
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="text-xs text-slate-300">Isolated sound</div>
+                      <button
+                        disabled={!results.target}
+                        onClick={() => downloadResult("target")}
+                        className="rounded-lg bg-white/10 px-2 py-1 text-[11px] text-slate-100 hover:bg-white/15 disabled:opacity-40"
+                      >
+                        Download
+                      </button>
+                    </div>
+                    {results.target ? (
+                      <audio ref={isolatedAudioRef} className="mt-2 w-full" controls src={results.target.url} />
+                    ) : (
+                      <div className="mt-2 text-sm text-slate-500">Run “Isolate sound” to generate.</div>
+                    )}
                   </div>
-                </>
-              ) : (
-                <>
-                  <div className="font-semibold">Multimodal Studio (next)</div>
-                  <div className="mt-2 text-slate-400">
-                    Combine text + span + visual chips into a single prompt node, then generate audio + mask tracks.
+
+                  <div className="rounded-xl border border-white/10 bg-black/30 p-3">
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="text-xs text-slate-300">Without isolated sound</div>
+                      <button
+                        disabled={!results.residual}
+                        onClick={() => downloadResult("residual")}
+                        className="rounded-lg bg-white/10 px-2 py-1 text-[11px] text-slate-100 hover:bg-white/15 disabled:opacity-40"
+                      >
+                        Download
+                      </button>
+                    </div>
+                    {results.residual ? (
+                      <audio ref={backgroundAudioRef} className="mt-2 w-full" controls src={results.residual.url} />
+                    ) : (
+                      <div className="mt-2 text-sm text-slate-500">Use “Get background track” to generate.</div>
+                    )}
                   </div>
-                </>
-              )}
+                </div>
+              </div>
             </div>
           )}
-        </aside>
+        </section>
       </div>
-    </main>
+    </div>
   );
 }
 

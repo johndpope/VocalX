@@ -54,7 +54,6 @@ model ProcessingJob {
   id             String   @id @default(uuid())
   userId         String   @map("user_id")
   fileId         String   @map("file_id")
-  paperspaceJobId String? @unique @map("paperspace_job_id")
   promptType     String   @map("prompt_type")
   promptData     Json?    @map("prompt_data")
   status         String   @default("queued")

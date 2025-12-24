@@ -1,7 +1,8 @@
 import { getServerSession } from "next-auth";
 import { z } from "zod";
 import { authOptions } from "@/lib/auth";
-import { prisma } from "@/lib/db";
+import { connectMongoose } from "@/lib/mongo";
+import { FileModel, UserModel } from "@/models";
 import { getS3Client, requireBucket } from "@/lib/s3";
 import { PutObjectCommand } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
@@ -18,6 +19,8 @@ export async function POST(req: Request) {
     return Response.json({ error: "Unauthorized" }, { status: 401 });
   }
 
+  await connectMongoose();
+
   const json = await req.json().catch(() => null);
   const parsed = BodySchema.safeParse(json);
   if (!parsed.success) {
@@ -30,12 +33,31 @@ export async function POST(req: Request) {
     return Response.json({ error: "File too large (max 2GB)" }, { status: 413 });
   }
 
-  // NOTE: We’ll normalize user ids later once DB auth is implemented.
-  const user = await prisma.user.upsert({
-    where: { email: session.user.email },
-    update: { name: session.user.name ?? undefined, avatarUrl: session.user.image ?? undefined },
-    create: { email: session.user.email, name: session.user.name ?? undefined, avatarUrl: session.user.image ?? undefined },
-  });
+  const update: Record<string, unknown> = { updatedAt: new Date() };
+  if (session.user.name) update.name = session.user.name;
+  if (session.user.image) update.avatarUrl = session.user.image;
+
+  const user = await UserModel.findOneAndUpdate(
+    { email: session.user.email },
+    {
+      $set: update,
+      $setOnInsert: {
+        id: crypto.randomUUID(),
+        email: session.user.email,
+        name: session.user.name ?? undefined,
+        avatarUrl: session.user.image ?? undefined,
+        subscriptionTier: "free",
+        usageLimit: 10,
+        usageUsed: 0,
+        createdAt: new Date(),
+      },
+    },
+    { upsert: true, new: true }
+  ).select({ id: 1 }).lean();
+
+  if (!user?.id) {
+    return Response.json({ error: "Unable to create user" }, { status: 500 });
+  }
 
   const id = crypto.randomUUID();
   const key = `temp/${user.id}/${id}/${filename}`;
@@ -53,16 +75,16 @@ export async function POST(req: Request) {
     { expiresIn: 3600 }
   );
 
-  await prisma.file.create({
-    data: {
-      id,
-      userId: user.id,
-      originalFilename: filename,
-      fileType,
-      fileSize: BigInt(fileSize),
-      s3Key: key,
-      status: "uploaded",
-    },
+  await FileModel.create({
+    id,
+    userId: user.id,
+    originalFilename: filename,
+    fileType,
+    fileSize,
+    s3Key: key,
+    status: "uploaded",
+    createdAt: new Date(),
+    updatedAt: new Date(),
   });
 
   return Response.json({ fileId: id, uploadUrl, expiresIn: 3600 });

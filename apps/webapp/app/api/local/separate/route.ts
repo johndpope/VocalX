@@ -4,12 +4,14 @@ function jsonError(status: number, message: string, details?: unknown) {
   return Response.json({ ok: false, error: message, details }, { status });
 }
 
+export const runtime = "nodejs";
+
 export async function POST(req: Request) {
-  if (!env.LOCAL_WORKER_URL) {
+  if (!env.WORKER_URL) {
     return jsonError(
       400,
-      "LOCAL_WORKER_URL is not configured",
-      "Set LOCAL_WORKER_URL=http://localhost:8000 (or your worker host) and restart the webapp."
+      "WORKER_URL is not configured",
+      "Set WORKER_URL=http://localhost:8000 (or your worker host) and restart the webapp."
     );
   }
 
@@ -23,7 +25,7 @@ export async function POST(req: Request) {
 
   if (!(file instanceof File)) return jsonError(400, "Missing file");
 
-  const workerUrl = env.LOCAL_WORKER_URL.replace(/\/+$/, "");
+  const workerUrl = env.WORKER_URL.replace(/\/+$/, "");
   const fd = new FormData();
   fd.set("audio", file, file.name);
   fd.set("description", description);
@@ -34,7 +36,10 @@ export async function POST(req: Request) {
   const url = `${workerUrl}/sam_audio/separate`;
   let res: Response;
   try {
-    res = await fetch(url, { method: "POST", body: fd });
+    const headers: HeadersInit | undefined = env.WORKER_API_KEY
+      ? { authorization: `Bearer ${env.WORKER_API_KEY}` }
+      : undefined;
+    res = await fetch(url, { method: "POST", body: fd, headers });
   } catch (e) {
     return jsonError(502, "Worker unreachable", {
       tried: url,

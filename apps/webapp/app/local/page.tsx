@@ -16,8 +16,8 @@ export default function LocalTestPage() {
 
   const hint = useMemo(() => {
     return `This page bypasses NextAuth/S3/DB and calls your local worker via /api/local/separate.\n\n` +
-      `Required env:\n- LOCAL_WORKER_URL=http://localhost:8000\n\n` +
-      `Worker requirements:\n- SAM-Audio weights present in apps/webapp/Models/SAM Audio (currently your folder appears empty)\n- sam_audio python package installed in worker venv\n- torchaudio installed for WAV output`;
+      `Required env:\n- WORKER_URL=http://localhost:8000\n\n` +
+      `Worker requirements:\n- GPU model service running on your worker host\n- accepts POST /sam_audio/separate (multipart) and/or /v1/jobs (json) depending on your mode`;
   }, []);
 
   async function submit() {
@@ -53,8 +53,9 @@ export default function LocalTestPage() {
       a.click();
       a.remove();
       URL.revokeObjectURL(url);
-    } catch (e: any) {
-      setError(e?.message || String(e));
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      setError(msg || "Unknown error");
     } finally {
       setIsSubmitting(false);
     }
