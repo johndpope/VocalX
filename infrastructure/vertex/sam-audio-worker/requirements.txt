@@ -1,0 +1,13 @@
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+pydantic==2.10.4
+requests==2.32.3
+
+# ML deps
+torch
+torchaudio
+transformers
+huggingface-hub
+git+https://github.com/facebookresearch/sam-audio.git
+
+

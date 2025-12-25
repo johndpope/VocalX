@@ -14,6 +14,11 @@ const EnvSchema = z.object({
   AWS_SECRET_ACCESS_KEY: z.string().optional(),
   AWS_REGION: z.string().optional(),
   AWS_S3_BUCKET: z.string().optional(),
+  // Vertex AI (recommended for MVP if GPU VM quota is hard)
+  VERTEX_PROJECT_ID: z.string().optional(),
+  VERTEX_LOCATION: z.string().optional(),
+  VERTEX_ENDPOINT_ID: z.string().optional(),
+  VERTEX_PREDICT_ROUTE: z.string().optional(), // default: /predict
   // Worker base URL (on GCP). Kept `LOCAL_WORKER_URL` for backward compatibility.
   WORKER_URL: z.string().optional(),
   LOCAL_WORKER_URL: z.string().optional(),

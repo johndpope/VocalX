@@ -1,4 +1,5 @@
 import { env } from "@/lib/env";
+import { isVertexEnabled, vertexSamAudioPredict } from "@/lib/vertex";
 
 function jsonError(status: number, message: string, details?: unknown) {
   return Response.json({ ok: false, error: message, details }, { status });
@@ -7,6 +8,57 @@ function jsonError(status: number, message: string, details?: unknown) {
 export const runtime = "nodejs";
 
 export async function POST(req: Request) {
+  // Vertex AI path (recommended): webapp -> Vertex Endpoint (GPU) -> model container
+  if (isVertexEnabled()) {
+    const form = await req.formData().catch(() => null);
+    if (!form) return jsonError(400, "Invalid form data");
+
+    const file = form.get("file");
+    const description = String(form.get("description") ?? "");
+    const anchorsJson = String(form.get("anchorsJson") ?? "");
+    const which = String(form.get("which") ?? "target"); // target | residual
+
+    if (!(file instanceof File)) return jsonError(400, "Missing file");
+    if (!description.trim()) return jsonError(400, "Missing description");
+    if (which !== "target" && which !== "residual") return jsonError(400, "Invalid which");
+
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    const pred = await vertexSamAudioPredict({
+      audioBytes: bytes,
+      filename: file.name || "input",
+      description,
+      anchorsJson,
+      which,
+      predictSpans: false,
+      rerankingCandidates: 0,
+    });
+
+    if (!pred?.ok) {
+      return jsonError(502, "Vertex worker error", pred);
+    }
+
+    const base64Key =
+      which === "residual" ? ("residual_wav_base64" as const) : ("target_wav_base64" as const);
+    const b64 = (pred as Record<string, unknown>)[base64Key];
+    if (typeof b64 !== "string" || !b64.length) {
+      return jsonError(502, "Vertex worker did not return WAV base64", pred);
+    }
+
+    const wavBytes = Buffer.from(b64, "base64");
+    const safeBase = (file.name || "audio").replace(/[^\w.\-]+/g, "_").slice(0, 64);
+    const outName = `${safeBase}.${which}.wav`;
+
+    return new Response(wavBytes, {
+      status: 200,
+      headers: {
+        "content-type": "audio/wav",
+        "content-disposition": `attachment; filename="${outName}"`,
+        "cache-control": "no-store",
+      },
+    });
+  }
+
+  // Direct worker URL path: webapp -> worker (FastAPI) -> model
   if (!env.WORKER_URL) {
     return jsonError(
       400,
