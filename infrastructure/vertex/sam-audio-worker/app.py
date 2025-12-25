@@ -6,7 +6,7 @@ from typing import Any, Dict, List, Optional
 
 import torch
 import torchaudio
-from fastapi import FastAPI
+from fastapi import FastAPI, File, Form, Header, HTTPException, UploadFile
 from pydantic import BaseModel
 
 from sam_audio import SAMAudio, SAMAudioProcessor
@@ -31,6 +31,21 @@ class PredictRequest(BaseModel):
 _DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 _MODEL: Optional[SAMAudio] = None
 _PROCESSOR: Optional[SAMAudioProcessor] = None
+
+
+def _require_auth(authorization: Optional[str]):
+    """
+    Optional bearer token auth for public deployments.
+    If WORKER_API_KEY is not set, auth is not required.
+    """
+    key = os.getenv("WORKER_API_KEY", "").strip()
+    if not key:
+        return
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Missing bearer token")
+    token = authorization.removeprefix("Bearer ").strip()
+    if token != key:
+        raise HTTPException(status_code=403, detail="Invalid token")
 
 
 def _ensure_loaded():
@@ -96,6 +111,65 @@ def _write_wav_bytes(wave: torch.Tensor, sample_rate: int) -> bytes:
 @app.get("/health")
 def health():
     return {"ok": True, "device": str(_DEVICE)}
+
+
+@app.post("/sam_audio/separate")
+async def sam_audio_separate(
+    authorization: Optional[str] = Header(default=None),
+    audio: UploadFile = File(...),
+    description: str = Form(default=""),
+    anchors_json: str = Form(default=""),
+    predict_spans: str = Form(default="false"),
+    reranking_candidates: str = Form(default="0"),
+) -> Dict[str, Any]:
+    """
+    Compatibility endpoint for the VocalX webapp:
+    - multipart fields: audio, description, anchors_json, predict_spans, reranking_candidates
+    - returns: { ok, target_wav_base64, residual_wav_base64 }
+    """
+    _require_auth(authorization)
+    _ensure_loaded()
+    assert _MODEL is not None
+    assert _PROCESSOR is not None
+
+    raw = await audio.read()
+    if not raw:
+        return {"ok": False, "error": "Empty file"}
+
+    with tempfile.TemporaryDirectory() as td:
+        in_path = os.path.join(td, audio.filename or "input")
+        wav_path = os.path.join(td, "input.wav")
+        with open(in_path, "wb") as f:
+            f.write(raw)
+        _to_wav_path(in_path, wav_path)
+
+        anchors = None
+        if anchors_json and anchors_json.strip():
+            import json as _json
+
+            anchors = [_json.loads(anchors_json)]
+
+        batch = _PROCESSOR(
+            audios=[wav_path],
+            descriptions=[description or ""],
+            anchors=anchors,
+        ).to(_DEVICE)
+
+        with torch.inference_mode():
+            result = _MODEL.separate(
+                batch,
+                predict_spans=str(predict_spans).lower() in ("true", "1", "yes"),
+                reranking_candidates=int(reranking_candidates or 0),
+            )
+
+        sr = int(getattr(_PROCESSOR, "audio_sampling_rate", 44100))
+        target = result.target[0]
+        residual = result.residual[0]
+
+        target_b64 = base64.b64encode(_write_wav_bytes(target, sr)).decode("utf-8")
+        residual_b64 = base64.b64encode(_write_wav_bytes(residual, sr)).decode("utf-8")
+
+        return {"ok": True, "target_wav_base64": target_b64, "residual_wav_base64": residual_b64}
 
 
 @app.post("/predict")

@@ -21,6 +21,8 @@ RUN curl -sS https://bootstrap.pypa.io/get-pip.py -o /tmp/get-pip.py && \
     python3.11 /tmp/get-pip.py && \
     rm -f /tmp/get-pip.py && \
     python3.11 -m pip install --upgrade pip setuptools wheel && \
+    # Install CUDA-enabled torch/torchaudio to match the CUDA runtime base image.
+    python3.11 -m pip install --no-cache-dir --index-url https://download.pytorch.org/whl/cu121 torch torchaudio && \
     python3.11 -m pip install --no-cache-dir -r /app/requirements.txt
 
 COPY app.py /app/app.py

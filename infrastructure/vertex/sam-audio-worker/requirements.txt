@@ -9,9 +9,6 @@ numpy==1.26.4
 # Some SAM-Audio deps require protobuf < 3.20
 protobuf>=3.9.2,<3.20
 
-torch
-torchaudio
-
 # transformers 4.57.x requires huggingface-hub < 1.0
 transformers==4.57.3
 huggingface-hub>=0.34.0,<1.0
