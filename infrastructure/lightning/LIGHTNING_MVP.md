@@ -50,8 +50,8 @@ Example (Docker Hub):
 2. Login and push:
 
 ```bash
-docker tag sam-audio-worker:latest lohitmilano/sam-audio-worker:latest
-docker push lohitmilano/sam-audio-worker:latest
+docker tag sam-audio-worker:latest YOUR_DOCKERHUB_USER/sam-audio-worker:latest
+docker push YOUR_DOCKERHUB_USER/sam-audio-worker:latest
 ```
 
 ---
@@ -63,6 +63,9 @@ Lightning has multiple product surfaces; the key requirement is:
 - run a long-lived service
 - expose a public URL/port
 
+Note:
+- Prefer deploying the container directly via the Lightning GUI (as a service/app).
+- Running `docker run` *inside* a Lightning terminal/session often won't have GPU access.
 ### Run the container
 1. Create a new Lightning project/workspace.
 2. Create a GPU instance/session (choose the smallest GPU available for MVP).
@@ -77,7 +80,7 @@ docker run --rm -p 8080:8080 \
   -e HF_TOKEN="$HF_TOKEN" \
   -e SAM_MODEL_ID="facebook/sam-audio-small" \
   -e WORKER_API_KEY="$WORKER_API_KEY" \
-  lohitmilano/sam-audio-worker:latest
+   YOUR_DOCKERHUB_USER/sam-audio-worker:latest
 ```
 
 5. Lightning will provide a public URL for the exposed port (often via a “share” / “expose” UI).

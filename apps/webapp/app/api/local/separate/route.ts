@@ -89,7 +89,10 @@ export async function POST(req: Request) {
   let res: Response;
   try {
     const headers: HeadersInit | undefined = env.WORKER_API_KEY
-      ? { authorization: `Bearer ${env.WORKER_API_KEY}` }
+      ? {
+          authorization: `Bearer ${env.WORKER_API_KEY}`,
+          "x-api-key": env.WORKER_API_KEY,
+        }
       : undefined;
     res = await fetch(url, { method: "POST", body: fd, headers });
   } catch (e) {
@@ -104,7 +107,14 @@ export async function POST(req: Request) {
 
   if (!res.ok) {
     const text = await res.text().catch(() => "");
-    return jsonError(502, "Worker error", text || `${res.status} ${res.statusText}`);
+    return jsonError(502, "Worker error", {
+      tried: url,
+      status: res.status,
+      statusText: res.statusText,
+      lightningRequestId: res.headers.get("x-lightning-request-id"),
+      lightningUpstream: res.headers.get("x-lightning-upstream"),
+      body: text || undefined,
+    });
   }
 
   const json = await res.json().catch(() => null);

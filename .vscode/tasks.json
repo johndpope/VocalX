@@ -1,0 +1,357 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"label": "probe-hello",
+			"type": "shell",
+			"command": "cmd.exe",
+			"args": [
+				"/c",
+				"echo hello> task-hello.txt"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "probe-affiliate-login",
+			"type": "shell",
+			"command": "powershell.exe",
+			"args": [
+				"-NoProfile",
+				"-Command",
+				"Set-Location 'C:\\Users\\sendl\\Documents\\Projects\\VocalX'; $out='probe-login.txt'; Remove-Item $out -ErrorAction SilentlyContinue; $r = & curl.exe --max-time 8 -sS -i -X POST 'http://127.0.0.1:3001/api/auth/login' -H 'Content-Type: application/json' --data-raw '{\"email\":\"admin@getvocalx.app\",\"password\":\"admin123\"}' 2>&1; $r | Out-File -FilePath $out -Encoding utf8"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "probe-affiliate-login-cmd",
+			"type": "shell",
+			"command": "cmd.exe",
+			"args": [
+				"/d",
+				"/s",
+				"/c",
+				"scripts\\probe-affiliate-login.cmd"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "start-affiliate-dev-detached",
+			"type": "shell",
+			"command": "cmd.exe",
+			"args": [
+				"/d",
+				"/s",
+				"/c",
+				"scripts\\start-affiliate-dev-detached.cmd"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "start-affiliate-dev-detached-2",
+			"type": "shell",
+			"command": "cmd.exe",
+			"args": [
+				"/d",
+				"/s",
+				"/c",
+				"scripts\\start-affiliate-dev-detached.cmd"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "wait-5s",
+			"type": "shell",
+			"command": "cmd.exe",
+			"args": [
+				"/d",
+				"/s",
+				"/c",
+				"timeout /t 5 /nobreak >nul"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "probe-affiliate-login-cmd-2",
+			"type": "shell",
+			"command": "cmd.exe",
+			"args": [
+				"/d",
+				"/s",
+				"/c",
+				"scripts\\probe-affiliate-login.cmd"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "start-all-dev-detached",
+			"type": "shell",
+			"command": "cmd.exe",
+			"args": [
+				"/d",
+				"/s",
+				"/c",
+				"scripts\\start-all-dev-detached.cmd"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "wait-6s-for-servers",
+			"type": "shell",
+			"command": "cmd.exe",
+			"args": [
+				"/d",
+				"/s",
+				"/c",
+				"timeout /t 6 /nobreak >nul"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "probe-servers",
+			"type": "shell",
+			"command": "powershell.exe",
+			"args": [
+				"-NoProfile",
+				"-Command",
+				"$ErrorActionPreference='SilentlyContinue'; 'Affiliate 3001:'; Test-NetConnection 127.0.0.1 -Port 3001 | Select-Object TcpTestSucceeded | Format-List; 'Webapp 3000:'; Test-NetConnection 127.0.0.1 -Port 3000 | Select-Object TcpTestSucceeded | Format-List"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "start-all-dev-detached",
+			"type": "shell",
+			"command": "cmd.exe",
+			"args": [
+				"/d",
+				"/s",
+				"/c",
+				"scripts\\start-all-dev-detached.cmd"
+			],
+			"isBackground": false,
+			"problemMatcher": []
+		},
+		{
+			"label": "probe-servers-ports",
+			"type": "shell",
+			"command": "powershell.exe",
+			"args": [
+				"-NoProfile",
+				"-Command",
+				"$ErrorActionPreference='SilentlyContinue'; $r1=Test-NetConnection 127.0.0.1 -Port 3001 -WarningAction SilentlyContinue; Write-Host ('Affiliate 3001: ' + $r1.TcpTestSucceeded); $r2=Test-NetConnection 127.0.0.1 -Port 3000 -WarningAction SilentlyContinue; Write-Host ('Webapp 3000: ' + $r2.TcpTestSucceeded)"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "run-probe-servers-cmd",
+			"type": "shell",
+			"command": "cmd.exe",
+			"args": [
+				"/d",
+				"/s",
+				"/c",
+				"scripts\\probe-servers.cmd"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "dev",
+			"type": "shell",
+			"command": "\"C:\\Program Files\\nodejs\\npm.cmd\" run dev",
+			"isBackground": true,
+			"problemMatcher": [],
+			"group": "build"
+		},
+		{
+			"label": "dev:webapp",
+			"type": "shell",
+			"command": "powershell",
+			"args": [
+				"-NoProfile",
+				"-ExecutionPolicy",
+				"Bypass",
+				"-Command",
+				"Set-Location \"C:\\Users\\sendl\\Documents\\Projects\\VocalX\"; & \"C:\\Program Files\\nodejs\\npm.cmd\" run dev"
+			],
+			"isBackground": true,
+			"problemMatcher": [],
+			"group": "build"
+		},
+		{
+			"label": "test:lightning-separate",
+			"type": "shell",
+			"command": "powershell.exe",
+			"args": [
+				"-NoProfile",
+				"-ExecutionPolicy",
+				"Bypass",
+				"-Command",
+				"$worker='https://8080-dep-01kdc7070wfjya4cd2ngcfccee-d.cloudspaces.litng.ai'; $wav=\"$env:TEMP\\copilot_test.wav\"; if (!(Test-Path $wav)) { Write-Error \"Missing $wav\"; exit 2 }; $hdr=\"$env:TEMP\\lit_hdr.txt\"; $body=\"$env:TEMP\\lit_body.bin\"; & \"$env:SystemRoot\\System32\\curl.exe\" -sS -D $hdr -o $body --max-time 240 -w \"`nCURL_HTTP=%{http_code} time_total=%{time_total}`n\" -X POST -H \"Authorization: Bearer optionalkey\" -H \"x-api-key: optionalkey\" -F \"audio=@$wav;type=audio/wav\" -F \"description=speech\" \"$worker/sam_audio/separate\"; '--- headers (first 40) ---'; Get-Content $hdr | Select-Object -First 40; '--- body size ---'; (Get-Item $body).Length"
+			],
+			"isBackground": false,
+			"problemMatcher": []
+		},
+		{
+			"label": "diag-echo",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"echo hi > task-hello.txt"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "diag-worker-separate",
+			"type": "shell",
+			"command": "powershell",
+			"args": [
+				"-NoProfile",
+				"-ExecutionPolicy",
+				"Bypass",
+				"-File",
+				"scripts\\diagnostics\\worker_separate.ps1",
+				"-WorkerUrl",
+				"https://8080-dep-01kdc7070wfjya4cd2ngcfccee-d.cloudspaces.litng.ai",
+				"-ApiKey",
+				"optionalkey",
+				"-MaxTimeSeconds",
+				"600"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "diag-check-curl-proc",
+			"type": "shell",
+			"command": "powershell",
+			"args": [
+				"-NoProfile",
+				"-ExecutionPolicy",
+				"Bypass",
+				"-Command",
+				"Get-Process curl -ErrorAction SilentlyContinue | Select-Object Id,StartTime,Path | Format-Table -AutoSize | Out-String | Set-Content -Path scripts\\diagnostics\\out\\curl_procs.txt"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "diag-curl-stats",
+			"type": "shell",
+			"command": "powershell",
+			"args": [
+				"-NoProfile",
+				"-ExecutionPolicy",
+				"Bypass",
+				"-Command",
+				"Get-Process -Id 13300 | Select-Object Id,CPU,StartTime,Responding | Format-List | Out-String | Set-Content -Path scripts\\diagnostics\\out\\curl_stats.txt"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "diag-wait-60s",
+			"type": "shell",
+			"command": "powershell",
+			"args": [
+				"-NoProfile",
+				"-ExecutionPolicy",
+				"Bypass",
+				"-Command",
+				"Start-Sleep -Seconds 60"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "diag-check-curl-proc2",
+			"type": "shell",
+			"command": "powershell",
+			"args": [
+				"-NoProfile",
+				"-ExecutionPolicy",
+				"Bypass",
+				"-Command",
+				"Get-Process curl -ErrorAction SilentlyContinue | Select-Object Id,CPU,StartTime | Format-Table -AutoSize | Out-String | Set-Content -Path scripts\\diagnostics\\out\\curl_procs2.txt"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "diag-kill-curl",
+			"type": "shell",
+			"command": "powershell",
+			"args": [
+				"-NoProfile",
+				"-ExecutionPolicy",
+				"Bypass",
+				"-Command",
+				"Stop-Process -Id 13300 -Force"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "diag-worker-separate-240s-trace",
+			"type": "shell",
+			"command": "powershell",
+			"args": [
+				"-NoProfile",
+				"-ExecutionPolicy",
+				"Bypass",
+				"-File",
+				"scripts\\diagnostics\\worker_separate.ps1",
+				"-WorkerUrl",
+				"https://8080-dep-01kdc7070wfjya4cd2ngcfccee-d.cloudspaces.litng.ai",
+				"-ApiKey",
+				"optionalkey",
+				"-MaxTimeSeconds",
+				"240",
+				"-Trace"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "diag-health",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"\"%SystemRoot%\\System32\\curl.exe\" -sS -i --http1.1 https://8080-dep-01kdc7070wfjya4cd2ngcfccee-d.cloudspaces.litng.ai/health"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "git-init",
+			"type": "shell",
+			"command": "powershell",
+			"args": [
+				"-NoProfile",
+				"-ExecutionPolicy",
+				"Bypass",
+				"-Command",
+				"Set-Location \"C:\\Users\\sendl\\Documents\\Projects\\VocalX\"; git init; git branch -M main; git remote remove origin 2>$null; git remote add origin https://github.com/lohitmilano/VocalX.git; git remote -v"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "git-prep-status",
+			"type": "shell",
+			"command": "powershell",
+			"args": [
+				"-NoProfile",
+				"-ExecutionPolicy",
+				"Bypass",
+				"-Command",
+				"Set-Location \"C:\\Users\\sendl\\Documents\\Projects\\VocalX\"; git status --porcelain=v1 | Measure-Object | ForEach-Object { \"untracked/modified lines: $($_.Count)\" }; git status -sb"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "git-add-commit",
+			"type": "shell",
+			"command": "powershell",
+			"args": [
+				"-NoProfile",
+				"-ExecutionPolicy",
+				"Bypass",
+				"-Command",
+				"Set-Location \"C:\\Users\\sendl\\Documents\\Projects\\VocalX\"; git add -A; git status -sb; git commit -m \"Add worker separate diagnostics script\""
+			],
+			"isBackground": false
+		}
+	]
+}

@@ -21,6 +21,11 @@ __pycache__/
 # Logs
 *.log
 
+# Local diagnostics / scratch
+probe-*.txt
+task-*.txt
+terminal_test.txt
+scripts/diagnostics/out/
 # OS
 Thumbs.db
 Desktop.ini
@@ -51,10 +56,3 @@ apps/webapp/Models/
 *.safetensors
 *.onnx
 .cursor\rules\openmemory.mdc
-
-# IDE
-.vscode/
-
-# Local probe files
-probe-*.txt
-task-*.txt
