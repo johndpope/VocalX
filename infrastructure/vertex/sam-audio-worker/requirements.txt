@@ -12,6 +12,15 @@ protobuf>=3.9.2,<3.20
 # transformers 4.57.x requires huggingface-hub < 1.0
 transformers==4.57.3
 huggingface-hub>=0.34.0,<1.0
-git+https://github.com/facebookresearch/sam-audio.git
+# sam-audio is installed separately in Dockerfile with --no-deps to prevent PyTorch override
+# git+https://github.com/facebookresearch/sam-audio.git
+
+# sam-audio runtime dependencies (without torch/torchaudio which we control)
+einops
+librosa
+soundfile
+pydub
+torchdiffeq
+audiobox_aesthetics
 
 
